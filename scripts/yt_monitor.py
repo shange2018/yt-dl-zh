@@ -371,34 +371,42 @@ def main():
             conn.close()
             continue
 
-        # 下载新视频
-        if not args.dry_run:
-            for table, id_col, item in new_items:
-                result = download_video(item['video_id'], item['title'], args.proxy)
-                if result:
-                    # 下载成功，设为 0
-                    c = conn.cursor()
-                    c.execute(f"UPDATE {table} SET downloaded=0, file_path=? WHERE {id_col}=?",
-                              (result, item['video_id']))
-                    conn.commit()
-                    total_dl += 1
-                    print(f"  ✅ 下载完成: {item['title'][:40]}", file=sys.stderr)
-                else:
-                    # 下载失败，downloaded +1
-                    c = conn.cursor()
-                    c.execute(f"UPDATE {table} SET downloaded = downloaded + 1 WHERE {id_col}=?",
-                              (item['video_id'],))
-                    conn.commit()
-                    print(f"  ❌ 下载失败 (第N次): {item['title'][:40]}", file=sys.stderr)
+        # 下载新视频（已注释，改为输出待下载列表）
+        # if not args.dry_run:
+        #     for table, id_col, item in new_items:
+        #         result = download_video(item['video_id'], item['title'], args.proxy)
+        #         if result:
+        #             c = conn.cursor()
+        #             c.execute(f"UPDATE {table} SET downloaded=0, file_path=? WHERE {id_col}=?",
+        #                       (result, item['video_id']))
+        #             conn.commit()
+        #             total_dl += 1
+        #             print(f"  ✅ 下载完成: {item['title'][:40]}", file=sys.stderr)
+        #         else:
+        #             c = conn.cursor()
+        #             c.execute(f"UPDATE {table} SET downloaded = downloaded + 1 WHERE {id_col}=?",
+        #                       (item['video_id'],))
+        #             conn.commit()
+        #             print(f"  ❌ 下载失败 (第N次): {item['title'][:40]}", file=sys.stderr)
+        # else:
+        #     print(f"  🔍 dry-run 模式，已插入 {len(new_items)} 条 (downloaded=1)", file=sys.stderr)
+
+        # 输出待下载列表
+        if new_items:
+            print(f"\n{'='*60}", file=sys.stderr)
+            print(f"📋 待下载列表 ({len(new_items)} 个):", file=sys.stderr)
+            print(f"{'='*60}", file=sys.stderr)
+            for i, (table, id_col, item) in enumerate(new_items, 1):
+                print(f"  {i:>3}. [{table}] {item['video_id']}  {item['pub_date'] or 'N/A'}  {item['title']}", file=sys.stderr)
         else:
-            print(f"  🔍 dry-run 模式，已插入 {len(new_items)} 条 (downloaded=1)", file=sys.stderr)
+            print(f"  ✅ 没有新视频需要下载", file=sys.stderr)
 
         conn.close()
 
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"📊 扫描完成: 新增 {total_new} 个视频", file=sys.stderr)
-    if not args.dry_run:
-        print(f"📊 下载完成: {total_dl} 个视频 → {DOWNLOAD_DIR}", file=sys.stderr)
+    # if not args.dry_run:
+    #     print(f"📊 下载完成: {total_dl} 个视频 → {DOWNLOAD_DIR}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
