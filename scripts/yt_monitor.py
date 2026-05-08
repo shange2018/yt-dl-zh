@@ -4,11 +4,11 @@ yt_monitor.py - YouTube 监控下载
 
 流程:
   1. 从 youtuber_list.md 读取频道列表
-  2. 对每个频道，抓取 /videos 页面获取最新视频列表
-  3. 过滤: 发布日期 >= 20260101，标题含中文字符
-  4. 对比 videos/shorts 表，跳过已存在的记录
+  2. 对每个频道,抓取 /videos 页面获取最新视频列表
+  3. 过滤: 发布日期 >= 20260101,标题含中文字符
+  4. 对比 videos/shorts 表,跳过已存在的记录
   5. 插入新记录到数据库
-  6. 用 yt-dlp 下载视频(MP4) + 中文音轨，合并，以中文标题命名
+  6. 用 yt-dlp 下载视频(MP4) + 中文音轨,合并,以中文标题命名
 
 依赖:
   yt-dlp (with yt-dlp-ejs), node v24, ffmpeg
@@ -35,40 +35,39 @@ DOWNLOAD_DIR = os.path.expanduser("~/youtube-downloads")
 # ─── 数据库 ──────────────────────────────────────────────────────────────────
 
 def open_db(youtuber):
-    """打开（或创建）某频道的 SQLite 数据库"""
+    """打开(或创建)某频道的 SQLite 数据库"""
     db_path = os.path.join(SCRIPT_DIR, "videos_shorts_list.db")
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
-    c.execute("""CREATE TABLE IF NOT EXISTS videos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        yountuber TEXT NOT NULL,
-        video_id TEXT UNIQUE NOT NULL,
-        title TEXT,
-        duration TEXT,
-        views TEXT,
-        pub_date TEXT,
-        downloaded INTEGER DEFAULT 1,
-        file_path TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS shorts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        yountuber TEXT NOT NULL,
-        short_id TEXT UNIQUE NOT NULL,
-        title TEXT,
-        duration TEXT,
-        views TEXT,
-        pub_date TEXT,
-        downloaded INTEGER DEFAULT 1,
-        file_path TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-    )""")
+    # 建表(IF NOT EXISTS)并校验列名
+    for table, id_col in (('videos', 'video_id'), ('shorts', 'short_id')):
+        c.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            youtuber TEXT NOT NULL,
+            {id_col} TEXT UNIQUE NOT NULL,
+            title TEXT, duration TEXT, views TEXT, pub_date TEXT,
+            downloaded INTEGER DEFAULT 1, file_path TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )""")
+        # 校验列名是否正确(防止旧 db 结构残留)
+        c.execute(f'PRAGMA table_info({table})')
+        cols = [r[1] for r in c.fetchall()]
+        if 'youtuber' not in cols:
+            c.execute(f'DROP TABLE IF EXISTS {table}')
+            c.execute(f"""CREATE TABLE {table} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                youtuber TEXT NOT NULL,
+                {id_col} TEXT UNIQUE NOT NULL,
+                title TEXT, duration TEXT, views TEXT, pub_date TEXT,
+                downloaded INTEGER DEFAULT 1, file_path TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )""")
     conn.commit()
     return conn
 
 def exists_in_db(conn, table, id_col, vid):
-    """检查视频是否已下载成功（downloaded=0）"""
+    """检查视频是否已下载成功, downloaded=0"""
     c = conn.cursor()
     c.execute(f"SELECT 1 FROM {table} WHERE {id_col} = ? AND downloaded = 0", (vid,))
     return c.fetchone() is not None
@@ -88,15 +87,24 @@ def insert_video(conn, table, id_col, data):
 
 # ─── 页面抓取 ────────────────────────────────────────────────────────────────
 
-def fetch_page(url, proxy=PROXY):
+def fetch_page(url, proxy=PROXY, retries=3):
+    """请求 YouTube 页面, 返回 HTML, 失败自动重试"""
     proxy_handler = urllib.request.ProxyHandler({'http': proxy, 'https': proxy})
     opener = urllib.request.build_opener(proxy_handler)
-    req = urllib.request.Request(url, headers={
-        "User-Agent": UA,
-        "Accept-Language": "zh-CN,zh;q=0.9",
-    })
-    resp = opener.open(req, timeout=30)
-    return resp.read().decode('utf-8', errors='replace')
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": UA,
+                "Accept-Language": "zh-CN,zh;q=0.9",
+            })
+            resp = opener.open(req, timeout=30)
+            return resp.read().decode('utf-8', errors='replace')
+        except Exception as e:
+            if attempt < retries - 1:
+                import time
+                time.sleep(2)
+            else:
+                raise
 
 def extract_yt_initial_data(html):
     m = re.search(r'var ytInitialData = ({.*?});', html, re.DOTALL)
@@ -190,7 +198,7 @@ def parse_video_item(item):
     }
 
 def scrape_channel(channel):
-    """抓取频道 /videos 页面，返回过滤后的视频列表"""
+    """抓取频道 /videos 页面,返回过滤后的视频列表"""
     url = f"https://www.youtube.com/@{channel}/videos"
     html = fetch_page(url)
     data = extract_yt_initial_data(html)
@@ -241,7 +249,7 @@ def sanitize_filename(title):
 
 def download_video(video_id, title, proxy=PROXY):
     """
-    用 yt-dlp 下载视频(MP4) + 中文音轨，合并输出
+    用 yt-dlp 下载视频(MP4) + 中文音轨,合并输出
     输出文件: ~/youtube-downloads/<中文标题>.mp4
     """
     out_dir = DOWNLOAD_DIR
@@ -252,7 +260,7 @@ def download_video(video_id, title, proxy=PROXY):
 
     # 如果文件已存在则跳过
     if os.path.exists(out_path):
-        print(f"  ✅ 文件已存在，跳过: {safe_title}.mp4", file=sys.stderr)
+        print(f"  ✅ 文件已存在,跳过: {safe_title}.mp4", file=sys.stderr)
         return out_path
 
     env = {
@@ -289,7 +297,7 @@ def download_video(video_id, title, proxy=PROXY):
 # ─── 主流程 ──────────────────────────────────────────────────────────────────
 
 def load_youtuber_list(path):
-    """从 youtuber_list.md 读取活跃频道列表（只取合法的 YouTube 频道名）"""
+    """从 youtuber_list.md 读取活跃频道列表(只取合法的 YouTube 频道名)"""
     channels = []
     with open(path, 'r') as f:
         for line in f:
@@ -307,7 +315,7 @@ def load_youtuber_list(path):
 def main():
     parser = argparse.ArgumentParser(description="YouTube 监控下载")
     parser.add_argument("--channel", help="只处理指定频道")
-    parser.add_argument("--dry-run", action="store_true", help="只扫描，不下载")
+    parser.add_argument("--dry-run", action="store_true", help="只扫描,不下载")
     parser.add_argument("--list", action="store_true", help="只输出视频列表")
     parser.add_argument("--limit", type=int, default=50, help="每次抓取视频数")
     parser.add_argument("--proxy", default=PROXY)
@@ -320,7 +328,7 @@ def main():
     elif os.path.exists(list_path):
         channels = load_youtuber_list(list_path)
     else:
-        print(f"❌ 未找到 {list_path}，请创建或指定 --channel", file=sys.stderr)
+        print(f"❌ 未找到 {list_path},请创建或指定 --channel", file=sys.stderr)
         sys.exit(1)
 
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -371,7 +379,7 @@ def main():
             conn.close()
             continue
 
-        # 下载新视频（已注释，改为输出待下载列表）
+        # 下载新视频(已注释,改为输出待下载列表)
         # if not args.dry_run:
         #     for table, id_col, item in new_items:
         #         result = download_video(item['video_id'], item['title'], args.proxy)
@@ -389,7 +397,7 @@ def main():
         #             conn.commit()
         #             print(f"  ❌ 下载失败 (第N次): {item['title'][:40]}", file=sys.stderr)
         # else:
-        #     print(f"  🔍 dry-run 模式，已插入 {len(new_items)} 条 (downloaded=1)", file=sys.stderr)
+        #     print(f"  🔍 dry-run 模式,已插入 {len(new_items)} 条 (downloaded=1)", file=sys.stderr)
 
         # 输出待下载列表
         if new_items:
