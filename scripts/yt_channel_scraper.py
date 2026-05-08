@@ -30,6 +30,7 @@ yt_channel_scraper.py - 直接从 YouTube 页面抓取频道视频列表
 
 import re, json, sys, argparse, urllib.request
 from urllib.error import URLError
+from datetime import datetime, timedelta
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
 
@@ -180,6 +181,42 @@ def fmt_num(s):
     """1150万 → 1150万 / 1.6亿 → 1.6亿"""
     return s or "N/A"
 
+def parse_relative_date(text):
+    """
+    将 YouTube 相对发布时间转换为绝对日期。
+    支持格式: 5天前, 2小时前, 3周前, 2个月前, 1年前
+    返回: (原始文本, 计算出的日期字符串 YYYY-MM-DD)
+    """
+    if not text:
+        return text, "N/A"
+
+    now = datetime.now()
+    text = text.strip()
+
+    m = re.match(r'(\d+)\s*小时前', text)
+    if m:
+        dt = now - timedelta(hours=int(m.group(1)))
+    else:
+        m = re.match(r'(\d+)\s*天前', text)
+        if m:
+            dt = now - timedelta(days=int(m.group(1)))
+        else:
+            m = re.match(r'(\d+)\s*周前', text)
+            if m:
+                dt = now - timedelta(weeks=int(m.group(1)))
+            else:
+                m = re.match(r'(\d+)\s*个月前', text)
+                if m:
+                    dt = now - timedelta(days=int(m.group(1)) * 30)
+                else:
+                    m = re.match(r'(\d+)\s*年前', text)
+                    if m:
+                        dt = now - timedelta(days=int(m.group(1)) * 365)
+                    else:
+                        return text, text
+
+    return text, dt.strftime("%Y-%m-%d")
+
 # ─── 主流程 ──────────────────────────────────────────────────────────────────
 
 def main():
@@ -253,17 +290,22 @@ def main():
     # 截取需要的数量
     videos = videos[:args.limit]
 
+    # 转换相对日期为绝对日期
+    for v in videos:
+        _, v['date'] = parse_relative_date(v['pub_time'])
+
     # ── 输出 ──────────────────────────────────────────────────────────────
     if args.json:
         print(json.dumps(videos, ensure_ascii=False, indent=2))
     else:
-        header = f"{'ID':<12} {'时长':>8} {'播放量':>10} {'发布时间':>10} {'标题'}"
+        header = f"{'ID':<12} {'时长':>8} {'播放量':>10} {'发布日期':>12} {'标题'}"
         sep = "─" * 110
         print(f"\n{sep}\n{header}\n{sep}")
         for v in videos:
+            orig_date, abs_date = parse_relative_date(v['pub_time'])
             tag = " [Short]" if v['is_short'] else ""
             print(f"{v['id']:<12} {fmt_dur(v['duration']):>8} {fmt_num(v['views']):>10} "
-                  f"{v['pub_time']:>10} {v['title']}{tag}")
+                  f"{abs_date:>12} {v['title']}{tag}")
         print(sep)
         vc = sum(1 for v in videos if not v['is_short'])
         sc = sum(1 for v in videos if v['is_short'])
