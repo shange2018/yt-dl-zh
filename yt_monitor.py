@@ -75,7 +75,7 @@ def exists_in_db(conn, table, id_col, vid):
 def insert_video(conn, table, id_col, data):
     """插入一条视频记录"""
     c = conn.cursor()
-    vid = data.get('video_id') or data.get('short_id')
+    vid = data.get(id_col, '')
     c.execute(f"""INSERT OR IGNORE INTO {table}
                   (youtuber, {id_col}, title, duration, views, pub_date)
                   VALUES (?, ?, ?, ?, ?, ?)""",
@@ -189,6 +189,7 @@ def parse_video_item(item):
 
     return {
         'video_id': vid,
+        'short_id': vid,
         'title': title,
         'views': views,
         'pub_date': pub_date,
@@ -198,44 +199,61 @@ def parse_video_item(item):
     }
 
 def scrape_channel(channel):
-    """抓取频道 /videos 页面,返回过滤后的视频列表"""
-    url = f"https://www.youtube.com/@{channel}/videos"
-    html = fetch_page(url)
-    data = extract_yt_initial_data(html)
+    """抓取频道 /videos 和 /shorts 页面,返回过滤后的视频列表"""
+    all_videos = []
+    all_shorts = []
 
-    try:
-        contents = (data['contents']['twoColumnBrowseResultsRenderer']
-                          ['tabs'][1]['tabRenderer']['content']
-                          ['richGridRenderer']['contents'])
-    except (KeyError, IndexError):
-        return []
-
-    videos = []
-    shorts = []
-    for item in contents:
-        if 'richItemRenderer' not in item:
-            continue
-        v = parse_video_item(item)
-        if not v:
+    for page_type, suffix in [('videos', '/videos'), ('shorts', '/shorts')]:
+        url = f"https://www.youtube.com/@{channel}{suffix}"
+        print(f"  🔍 抓取 @{channel}{suffix} ...", file=sys.stderr)
+        try:
+            html = fetch_page(url)
+            data = extract_yt_initial_data(html)
+        except Exception as e:
+            print(f"  ⚠️ 抓取 {suffix} 失败: {e}", file=sys.stderr)
             continue
 
-        # 过滤1: 发布日期 >= 20260101
-        if v['pub_date'] and v['pub_date'] < MIN_DATE:
-            print(f"  ⏭️  跳过(日期太早 {v['pub_date']}): {v['title'][:40]}", file=sys.stderr)
+        try:
+            tabs = data['contents']['twoColumnBrowseResultsRenderer']['tabs']
+            # 找第一个有 richGridRenderer 的 tab（内容区）
+            contents = []
+            for tab in tabs:
+                tr = tab.get('tabRenderer', {})
+                rgr = tr.get('content', {}).get('richGridRenderer', {})
+                if rgr:
+                    contents = rgr.get('contents', [])
+                    break
+        except (KeyError, IndexError):
             continue
 
-        # 过滤2: 标题含中文
-        if not has_chinese(v['title']):
-            print(f"  ⏭️  跳过(无中文标题): {v['title'][:40]}", file=sys.stderr)
-            continue
+        for item in contents:
+            if 'richItemRenderer' not in item:
+                continue
+            v = parse_video_item(item)
+            if not v:
+                continue
 
-        v['youtuber'] = channel
-        if v['is_short']:
-            shorts.append(v)
-        else:
-            videos.append(v)
+            # 过滤1: 发布日期 >= 20260101
+            if v['pub_date'] and v['pub_date'] < MIN_DATE:
+                print(f"  ⏭️  跳过(日期太早 {v['pub_date']}): {v['title'][:40]}", file=sys.stderr)
+                continue
 
-    return videos, shorts
+            # 过滤2: 标题含中文
+            if not has_chinese(v['title']):
+                print(f"  ⏭️  跳过(无中文标题): {v['title'][:40]}", file=sys.stderr)
+                continue
+
+            v['youtuber'] = channel
+            if page_type == 'shorts':
+                all_shorts.append(v)
+            else:
+                # /videos 页面里 LOCKUP_CONTENT_TYPE_SHORTS 的也归入 shorts
+                if v['is_short']:
+                    all_shorts.append(v)
+                else:
+                    all_videos.append(v)
+
+    return all_videos, all_shorts
 
 # ─── 下载 ────────────────────────────────────────────────────────────────────
 
@@ -247,9 +265,10 @@ def sanitize_filename(title):
         title = title[:200]
     return title
 
-def download_video(video_id, title, proxy=PROXY):
+def download_video(video_id, title, proxy=PROXY, is_short=False):
     """
     用 yt-dlp 下载视频(MP4) + 中文音轨,合并输出
+    Shorts 用 /shorts/{id}, 普通视频用 /watch?v={id}
     输出文件: ~/youtube-downloads/<中文标题>.mp4
     """
     out_dir = DOWNLOAD_DIR
@@ -262,6 +281,11 @@ def download_video(video_id, title, proxy=PROXY):
     if os.path.exists(out_path):
         print(f"  ✅ 文件已存在,跳过: {safe_title}.mp4", file=sys.stderr)
         return out_path
+
+    if is_short:
+        url = f"https://www.youtube.com/shorts/{video_id}"
+    else:
+        url = f"https://www.youtube.com/watch?v={video_id}"
 
     env = {
         **os.environ,
@@ -279,7 +303,7 @@ def download_video(video_id, title, proxy=PROXY):
         "-o", os.path.join(out_dir, "%(title)s.%(ext)s"),
         "--no-overwrites",
         "--newline",
-        f"https://www.youtube.com/watch?v={video_id}",
+        url,
     ]
 
     print(f"  ⬇️  下载中: {title[:50]}...", file=sys.stderr)
@@ -360,7 +384,8 @@ def main():
 
         new_items = []
         for table, id_col, item in all_items:
-            if exists_in_db(conn, table, id_col, item['video_id']):
+            vid = item.get(id_col, '')
+            if exists_in_db(conn, table, id_col, vid):
                 print(f"  ⏭️  已存在: {item['title'][:40]}", file=sys.stderr)
                 continue
             insert_video(conn, table, id_col, item)
@@ -382,18 +407,20 @@ def main():
         # 下载新视频(已注释,改为输出待下载列表)
         # if not args.dry_run:
         #     for table, id_col, item in new_items:
-        #         result = download_video(item['video_id'], item['title'], args.proxy)
+        #         is_short = (table == 'shorts')
+        #         dl_id = item.get(id_col, '')
+        #         result = download_video(dl_id, item['title'], args.proxy, is_short=is_short)
         #         if result:
         #             c = conn.cursor()
         #             c.execute(f"UPDATE {table} SET downloaded=0, file_path=? WHERE {id_col}=?",
-        #                       (result, item['video_id']))
+        #                       (result, dl_id))
         #             conn.commit()
         #             total_dl += 1
         #             print(f"  ✅ 下载完成: {item['title'][:40]}", file=sys.stderr)
         #         else:
         #             c = conn.cursor()
         #             c.execute(f"UPDATE {table} SET downloaded = downloaded + 1 WHERE {id_col}=?",
-        #                       (item['video_id'],))
+        #                       (dl_id,))
         #             conn.commit()
         #             print(f"  ❌ 下载失败 (第N次): {item['title'][:40]}", file=sys.stderr)
         # else:
