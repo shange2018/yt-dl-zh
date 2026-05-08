@@ -68,9 +68,9 @@ def open_db(youtuber):
     return conn
 
 def exists_in_db(conn, table, id_col, vid):
-    """检查视频是否已在库中"""
+    """检查视频是否已在库中且已下载成功（downloaded=1）"""
     c = conn.cursor()
-    c.execute(f"SELECT 1 FROM {table} WHERE {id_col} = ?", (vid,))
+    c.execute(f"SELECT 1 FROM {table} WHERE {id_col} = ? AND downloaded = 1", (vid,))
     return c.fetchone() is not None
 
 def insert_video(conn, table, id_col, data):
@@ -382,8 +382,14 @@ def main():
                               (result, item['video_id']))
                     conn.commit()
                     total_dl += 1
+                    print(f"  ✅ 下载完成: {item['title'][:40]}", file=sys.stderr)
                 else:
-                    print(f"  ⚠️ 下载失败: {item['title'][:40]}", file=sys.stderr)
+                    # 下载失败，更新 downloaded=2 标记失败
+                    c = conn.cursor()
+                    c.execute(f"UPDATE {table} SET downloaded=2 WHERE {id_col}=?",
+                              (item['video_id'],))
+                    conn.commit()
+                    print(f"  ❌ 下载失败: {item['title'][:40]}", file=sys.stderr)
         else:
             print(f"  🔍 dry-run 模式，跳过下载", file=sys.stderr)
 
