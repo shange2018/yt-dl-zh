@@ -401,11 +401,14 @@ def main():
 
         # 输出待下载列表
         if new_items:
-            print(f"\n{'='*60}", file=sys.stderr)
+            print(f"\n{'='*80}", file=sys.stderr)
             print(f"📋 待下载列表 ({len(new_items)} 个):", file=sys.stderr)
-            print(f"{'='*60}", file=sys.stderr)
+            print(f"{'='*80}", file=sys.stderr)
+            header = f"  {'#':>4}  {'类型':>6}  {'ID':<12}  {'日期':<10}  {'时长':<10}  {'播放量':<12}  标题"
+            print(header, file=sys.stderr)
+            print(f"  {'─'*76}", file=sys.stderr)
             for i, (table, id_col, item) in enumerate(new_items, 1):
-                print(f"  {i:>3}. [{table}] {item['video_id']}  {item['pub_date'] or 'N/A'}  {item['title']}", file=sys.stderr)
+                print(f"  {i:>4}  {table:>6}  {item['video_id']:<12}  {item['pub_date'] or 'N/A':<10}  {item.get('duration','') or 'N/A':<10}  {item.get('views','') or 'N/A':<12}  {item['title']}", file=sys.stderr)
         else:
             print(f"  ✅ 没有新视频需要下载", file=sys.stderr)
 
