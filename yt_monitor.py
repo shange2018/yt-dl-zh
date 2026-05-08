@@ -148,7 +148,7 @@ def has_chinese(text):
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 def parse_video_item(item):
-    """从 richItemRenderer 解析单个视频数据"""
+    """从 richItemRenderer 解析单个视频数据 (lockupViewModel 结构)"""
     lvm = item.get('richItemRenderer', {}).get('content', {}).get('lockupViewModel', {})
     if not lvm:
         return None
@@ -198,6 +198,47 @@ def parse_video_item(item):
         'is_short': is_short,
     }
 
+
+def parse_shorts_item(item):
+    """从 richItemRenderer 解析 Shorts 数据 (shortsLockupViewModel 结构)"""
+    slvm = item.get('richItemRenderer', {}).get('content', {}).get('shortsLockupViewModel', {})
+    if not slvm:
+        return None
+
+    # ID 在 onTap -> reelWatchEndpoint -> videoId
+    try:
+        vid = slvm['onTap']['innertubeCommand']['reelWatchEndpoint']['videoId']
+    except (KeyError, TypeError):
+        return None
+
+    # 标题在 accessibilityText，格式: "标题, XXX万次观看 - 播放 Shorts 短视频"
+    accessibility_text = slvm.get('accessibilityText', '')
+    title = accessibility_text.split(',')[0].strip() if accessibility_text else ''
+
+    # 播放量也在 accessibilityText 里
+    views = ''
+    if accessibility_text:
+        import re as _re
+        m = _re.search(r'([\d\.]+万?)次观看', accessibility_text)
+        if m:
+            views = m.group(0)
+
+    # Shorts 页面没有发布时间，返回空
+    pub_date = ''
+    pub_time_raw = ''
+    duration = ''
+
+    return {
+        'video_id': vid,
+        'short_id': vid,
+        'title': title,
+        'views': views,
+        'pub_date': pub_date,
+        'pub_time_raw': pub_time_raw,
+        'duration': duration,
+        'is_short': True,
+    }
+
 def scrape_channel(channel):
     """抓取频道 /videos 和 /shorts 页面,返回过滤后的视频列表"""
     all_videos = []
@@ -229,7 +270,12 @@ def scrape_channel(channel):
         for item in contents:
             if 'richItemRenderer' not in item:
                 continue
-            v = parse_video_item(item)
+            # Shorts 页面用 shortsLockupViewModel 结构，需要单独解析
+            content_keys = item['richItemRenderer'].get('content', {}).keys()
+            if 'shortsLockupViewModel' in content_keys:
+                v = parse_shorts_item(item)
+            else:
+                v = parse_video_item(item)
             if not v:
                 continue
 
