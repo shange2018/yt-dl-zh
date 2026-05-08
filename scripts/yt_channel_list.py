@@ -6,7 +6,7 @@ yt_channel_list.py - 获取 YouTube 频道视频列表（Videos + Shorts）
   python3 yt_channel_list.py <频道名> [--limit 10] [--proxy http://127.0.0.1:2080] [--json]
 
 输出字段:
-  中文标题、英文标题、发布日期、播放量、赞数、评论数
+  中文标题、英文标题、发布日期、播放量、赞数、评论数、视频ID、时长、文件大小
   （收藏数和分享数 YouTube 不公开，无法获取）
 
 示例:
@@ -62,6 +62,8 @@ def get_engagement_data(video_ids):
                     'like_count': d.get('like_count'),
                     'comment_count': d.get('comment_count'),
                     'upload_date': d.get('upload_date'),
+                    'duration': d.get('duration'),           # 时长（秒）
+                    'filesize_approx': d.get('filesize_approx'),  # 文件大小（bytes）
                 }
             except json.JSONDecodeError:
                 pass
@@ -113,6 +115,26 @@ def format_date(d):
     if not d or len(d) != 8:
         return str(d)
     return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+
+def format_duration(seconds):
+    """7265 → 2:01:05  /  45 → 0:45"""
+    if seconds is None:
+        return "N/A"
+    h, rem = divmod(int(seconds), 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+def format_size(bytes_):
+    """123456789 → 117.7 MB"""
+    if bytes_ is None:
+        return "N/A"
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if abs(bytes_) < 1024:
+            return f"{bytes_:.1f} {unit}"
+        bytes_ /= 1024
+    return f"{bytes_:.1f} TB"
 
 # ─── 主流程 ──────────────────────────────────────────────────────────────────
 
@@ -224,6 +246,8 @@ def main():
             "views": eng.get('view_count'),
             "likes": eng.get('like_count'),
             "comments": eng.get('comment_count'),
+            "duration": eng.get('duration'),
+            "filesize": eng.get('filesize_approx'),
             "type": v['type'],
             "url": f"https://www.youtube.com/watch?v={vid}",
         }
@@ -235,8 +259,8 @@ def main():
     else:
         # 表格输出
         # 表头
-        header = f"{'发布日期':<12} {'播放量':>10} {'赞数':>10} {'评论数':>8} {'标题'}"
-        sep = "─" * 100
+        header = f"{'ID':<12} {'发布日期':<12} {'播放量':>10} {'赞数':>10} {'评论数':>8} {'时长':>8} {'大小':>10} {'标题'}"
+        sep = "─" * 130
         print(f"\n{sep}")
         print(header)
         print(sep)
@@ -245,8 +269,10 @@ def main():
             views_s = format_number(row['views'])
             likes_s = format_number(row['likes'])
             comm_s = format_number(row['comments'])
+            dur_s = format_duration(row['duration'])
+            size_s = format_size(row['filesize'])
             type_tag = " [Short]" if row['type'] == 'short' else ""
-            print(f"{row['date']:<12} {views_s:>10} {likes_s:>10} {comm_s:>8} {row['title']}{type_tag}")
+            print(f"{row['id']:<12} {row['date']:<12} {views_s:>10} {likes_s:>10} {comm_s:>8} {dur_s:>8} {size_s:>10} {row['title']}{type_tag}")
 
         print(sep)
         videos_count = sum(1 for r in output_data if r['type'] == 'video')
