@@ -48,7 +48,7 @@ def open_db(youtuber):
         duration TEXT,
         views TEXT,
         pub_date TEXT,
-        downloaded INTEGER DEFAULT 0,
+        downloaded INTEGER DEFAULT 1,
         file_path TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
@@ -60,7 +60,7 @@ def open_db(youtuber):
         duration TEXT,
         views TEXT,
         pub_date TEXT,
-        downloaded INTEGER DEFAULT 0,
+        downloaded INTEGER DEFAULT 1,
         file_path TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
@@ -68,9 +68,9 @@ def open_db(youtuber):
     return conn
 
 def exists_in_db(conn, table, id_col, vid):
-    """检查视频是否已在库中且已下载成功（downloaded=1）"""
+    """检查视频是否已下载成功（downloaded=0）"""
     c = conn.cursor()
-    c.execute(f"SELECT 1 FROM {table} WHERE {id_col} = ? AND downloaded = 1", (vid,))
+    c.execute(f"SELECT 1 FROM {table} WHERE {id_col} = ? AND downloaded = 0", (vid,))
     return c.fetchone() is not None
 
 def insert_video(conn, table, id_col, data):
@@ -376,22 +376,22 @@ def main():
             for table, id_col, item in new_items:
                 result = download_video(item['video_id'], item['title'], args.proxy)
                 if result:
-                    # 更新数据库标记已下载
+                    # 下载成功，设为 0
                     c = conn.cursor()
-                    c.execute(f"UPDATE {table} SET downloaded=1, file_path=? WHERE {id_col}=?",
+                    c.execute(f"UPDATE {table} SET downloaded=0, file_path=? WHERE {id_col}=?",
                               (result, item['video_id']))
                     conn.commit()
                     total_dl += 1
                     print(f"  ✅ 下载完成: {item['title'][:40]}", file=sys.stderr)
                 else:
-                    # 下载失败，更新 downloaded=2 标记失败
+                    # 下载失败，downloaded +1
                     c = conn.cursor()
-                    c.execute(f"UPDATE {table} SET downloaded=2 WHERE {id_col}=?",
+                    c.execute(f"UPDATE {table} SET downloaded = downloaded + 1 WHERE {id_col}=?",
                               (item['video_id'],))
                     conn.commit()
-                    print(f"  ❌ 下载失败: {item['title'][:40]}", file=sys.stderr)
+                    print(f"  ❌ 下载失败 (第N次): {item['title'][:40]}", file=sys.stderr)
         else:
-            print(f"  🔍 dry-run 模式，跳过下载", file=sys.stderr)
+            print(f"  🔍 dry-run 模式，已插入 {len(new_items)} 条 (downloaded=1)", file=sys.stderr)
 
         conn.close()
 
