@@ -355,7 +355,6 @@ def main():
             if exists_in_db(conn, table, id_col, item['video_id']):
                 print(f"  ⏭️  已存在: {item['title'][:40]}", file=sys.stderr)
                 continue
-            insert_video(conn, table, id_col, item)
             new_items.append((table, id_col, item))
             print(f"  🆕 新增: {item['title'][:50]} ({item['pub_date']})", file=sys.stderr)
 
@@ -371,21 +370,26 @@ def main():
             conn.close()
             continue
 
-        # 下载新视频
+        # 先下载，下载成功后再插入数据库
         if not args.dry_run:
             for table, id_col, item in new_items:
                 result = download_video(item['video_id'], item['title'], args.proxy)
                 if result:
-                    # 更新数据库标记已下载
+                    # 下载成功，插入数据库并标记已下载
+                    insert_video(conn, table, id_col, item)
                     c = conn.cursor()
                     c.execute(f"UPDATE {table} SET downloaded=1, file_path=? WHERE {id_col}=?",
                               (result, item['video_id']))
                     conn.commit()
                     total_dl += 1
+                    print(f"  ✅ 已下载并记录: {item['title'][:40]}", file=sys.stderr)
                 else:
-                    print(f"  ⚠️ 下载失败: {item['title'][:40]}", file=sys.stderr)
+                    print(f"  ⚠️ 下载失败，跳过: {item['title'][:40]}", file=sys.stderr)
         else:
-            print(f"  🔍 dry-run 模式，跳过下载", file=sys.stderr)
+            # dry-run 模式：只插入记录，不下载
+            for table, id_col, item in new_items:
+                insert_video(conn, table, id_col, item)
+            print(f"  🔍 dry-run 模式，已插入 {len(new_items)} 条记录", file=sys.stderr)
 
         conn.close()
 
